@@ -1,135 +1,125 @@
-# Saglasnik — review copilot for fire-protection documentation
+# ProjectLens: review copilot for fire-protection documentation
 
-> Saglasnik helps a fire-protection engineer review the main fire-protection design (GPZOP) together with the construction documents of the other disciplines, including the bill of quantities and CAD drawings. It drafts **objections with a legal basis and page-level evidence**. The engineer decides on every one.
->
-> This is a **showcase repository**. The product code is private while it is being developed.
+ProjectLens helps a fire-protection engineer review a building-permit submission: the main fire-protection design (GPZOP), the construction documents of the other disciplines (PZI), the bill of quantities and the CAD drawings. It drafts objections, each with a legal basis and a link to the page or drawing sheet that proves it. The engineer approves, edits or rejects every objection before anything leaves the tool.
 
-![Evidence-first review of a fire-protection design](screenshots/05-gpzop.png)
+Formerly **Saglasnik**. The project started at the Grok Bot Serbia Hackathon in Belgrade in September 2026 ([hackathon repo](https://github.com/Excapex/GROKHakaton)) and has been developed since then by a team of two, together with a licensed fire-protection engineer.
 
-**Status:** active development, private beta with a domain expert. **Origin:** grew out of [ProjectLens](https://github.com/Excapex/GROKHakaton), built in one day at the Grok Bot Serbia Hackathon (Belgrade, 12.09.2026).
+This is a showcase repository. The product code is private.
+
+![GPZOP review: findings, evidence and the engineer's decision](screenshots/05-gpzop-review-evidence.png)
+
+**Result so far:** on real projects, one fire-protection review that used to take the engineer about 15 hours now takes about 20 minutes, with the engineer still reading and signing off every objection.
 
 ---
 
-## Problem
+## Gallery
 
-Before a building in Serbia can be built or used, its fire-protection design is checked against a large body of regulations: laws, rulebooks and referenced standards. The reviewer's output is a letter of objections, each one citing an article. Today the reviewer builds that letter by hand:
+All screenshots use the app's built-in fictional demo data ("Objekat A/B/C"). Objection texts and rule references are blurred on purpose.
 
-- reading hundreds to thousands of pages across the GPZOP, the construction documents of each discipline, the bill of quantities and the DWG/DWFx drawings;
-- cross-checking that a measure required in the GPZOP actually appears in the drawings and in the bill of quantities;
-- working out which regime applies. The applicable rules depend on building use, category and the date of the permit.
+| | |
+|---|---|
+| ![Cases](screenshots/01-cases.png) Cases | ![Documents](screenshots/02-documents-intake.png) Document intake, one revision |
+| ![Masking](screenshots/03-masking-review.png) Masking review before any model call | ![Profile](screenshots/04-building-profile.png) Building profile the rules depend on |
+| ![GPZOP](screenshots/05-gpzop-review-evidence.png) GPZOP review: findings, evidence, decision | ![Compare](screenshots/06-compare-sources.png) Two sources side by side when they disagree |
+| ![Checklists](screenshots/07-checklists.png) Checklists per discipline with explicit scope | ![BoQ](screenshots/08-bill-of-quantities.png) Fire measures vs bill of quantities |
+| ![Export](screenshots/09-objections-export.png) Accepted objections and export | ![Mobile](screenshots/10-mobile-bill-of-quantities.png) Phone layout (375 px) |
 
-The recurring errors are rarely subtle. They are inconsistencies between documents, requirements missing from the bill of quantities, outdated classifications and wrong legal references. Each one that slips through costs the investor another review round.
+## The problem
 
-## Solution
+In Serbia, a building's fire-protection design is checked against laws, rulebooks and referenced standards before a permit is granted. The reviewer's output is a letter of objections, and each objection has to cite an article. Doing this by hand means:
 
-Saglasnik works through the review in the same order a reviewer does:
+- reading hundreds to thousands of pages: the GPZOP, every discipline's design, the bill of quantities, plus DWG and DWFx drawings;
+- checking that a measure promised in the GPZOP actually appears on the drawings and in the bill of quantities;
+- working out which rules apply, which depends on building use, size and the date of the permit.
 
-1. **Documentation.** Upload a whole submission, including ZIP/RAR archives, with provenance tracked for each file. Every page is classified (text, table, BoQ, drawing, scan) and normalized, including Cyrillic.
-2. **Building profile.** Extract the facts that decide which rules apply and let the engineer confirm them. Rules that depend on an unconfirmed profile are flagged as unreliable.
-3. **GPZOP review.** A findings list, the evidence viewer with the page, and a side panel with the problem, consequence, requirement, legal basis and calculation.
-4. **Checklists per discipline**, each with an explicit search scope.
-5. **Bill of quantities.** Measures required by the GPZOP are matched against BoQ items, with an arithmetic check (quantity × price = amount).
-6. **Objections and export.** Only findings the engineer accepted or edited go into the letter, which is exported to DOCX from a template.
+Most real errors are not subtle. They are inconsistencies between documents, missing bill-of-quantities items, outdated classifications and wrong legal references. Each one that slips through costs the investor another review round.
 
-What makes it different:
-
-- **The code judges, not the model.** The model only extracts facts into a closed schema, and deterministic rules produce the findings. "I don't know" is a valid answer, so it never gets turned into "compliant".
-- **The legal basis is copied, never generated.** Every objection carries its reference from a verified catalog. A finding without a basis is downgraded to "insufficient data".
-- **Privacy by default.** Project names, addresses, tax IDs, licences and stamps are masked before any external model call, and an engineer must confirm the masking first. The API refuses the call until then. Every outbound call is logged by hash.
-- **No approval.** The tool never issues consent and never states that a project is compliant.
-
-## Architecture
+## How it works
 
 ```mermaid
-flowchart TB
-  subgraph Client
-    FE[Web app: TanStack Start + React 19<br/>Tailwind 4 + shadcn/ui]
-  end
-  subgraph Backend[FastAPI backend]
-    ING[Intake: archives, formats, SHA-256 dedup, provenance]
-    MAN[Page manifest + normalization<br/>incl. Cyrillic transliteration]
-    CAD[CAD measurements<br/>DWG via converter, DWFx geometry]
-    BOQ[Bill-of-quantities parser<br/>arithmetic check]
-    MASK[Masking gate<br/>engineer confirmation required]
-    AI[Model adapter<br/>budget, log, closed schema]
-    RULES[Deterministic rule engine<br/>+ verified objection catalog]
-    EXP[Letter export - DOCX template]
-  end
-  DB[(PostgreSQL)]
-  FS[(Originals on disk by hash)]
-  LLM[[External LLM - masked text only]]
-
-  FE -- REST, OpenAPI contract --> ING
-  ING --> FS
-  ING --> MAN --> MASK --> AI --> LLM
-  MAN --> BOQ
-  ING --> CAD
-  AI --> RULES
-  BOQ --> RULES
-  CAD --> RULES
-  RULES --> DB
-  DB --> FE
-  RULES --> EXP
+flowchart LR
+  A[Upload submission<br/>PDF, DOCX, XLSX, DWG, DWFx, ZIP/RAR] --> B[Page manifest<br/>text, table, BoQ, drawing, scan]
+  B --> C[Building profile<br/>engineer confirms]
+  B --> D[Masking gate<br/>engineer confirms]
+  A --> E[CAD pipeline<br/>DWG to DXF, sheets, legends,<br/>blocks, dimensions, sheet images]
+  D --> F[Model reads masked text<br/>and masked sheet images]
+  E --> F
+  C --> G[Checks per building element<br/>text vs drawing vs BoQ vs regulation]
+  F --> G
+  G --> H[Findings with evidence<br/>page, sheet, quote, legal basis]
+  H --> I{Engineer decides<br/>accept, edit, reject, defer}
+  I --> J[Export: formal decision document<br/>DOCX, Cyrillic or Latin]
 ```
+
+1. **Intake.** A whole submission goes in at once, archives included. Every page is classified and every file keeps its origin.
+2. **Profile.** The facts that decide which rules apply (use, height, occupancy, fire sectors) are extracted and confirmed by the engineer. Findings that depend on an unconfirmed profile are flagged.
+3. **Masking.** Names, addresses, parcel numbers, licences and stamps are blacked out before any external call, and the engineer must confirm the masking first. The API refuses the call until then.
+4. **Review.** For each building element, the tool compares what the GPZOP says with the discipline volumes, the drawings, the bill of quantities and the regulation. The model extracts facts and points at things on drawings; code does the counting, measuring and comparing.
+5. **Decision and export.** Only objections the engineer accepted or edited go into the exported document.
+
+## What changed since the hackathon
+
+- **Drawings are read as images.** Drawing sheets (from DWG, DWFx, or drawing pages inside PDFs) are rendered and sent to the model after masking. The model says what a sheet is and points at locations; code counts symbols and measures from the vector geometry. A PDF drawing page is only used to find the same sheet in the DWG/DWFx, so measurements come from the vector file.
+- **Fast DWG processing.** Reading a 20 MB DWG (161 MB once converted to DXF) went from about 33 minutes to about 3 minutes with identical output, by measuring each block once instead of once per insert and reading texts once. Several drawings that used to fail on intake now convert and read.
+- **Accuracy is measured, not guessed.** A built-in evaluator compares a review against the objections the engineer wrote by hand on the same project, explains every miss by cause (element not reviewed, page not sent, comparison found nothing, and so on), and reports precision from the engineer's decisions and repeatability between two runs. On two real, anonymized submissions, all 13 hand-written objections were matched to a finding, either as the same defect or as a related finding on the same topic. Precision is the next number to collect, once the engineer has decided on enough findings.
+- **Unsent-pages report.** Every page that does not go to the model gets a reason (scan, Cyrillic not yet confirmed, residue after masking, too little text). That report showed that most unread content sat on drawing sheets inside PDFs, which led directly to the drawings-as-images work.
+- **Masking got stricter and faster.** Extra masking passes for leftovers, rotated words masked whole, per-case confirmation for Cyrillic. Pages made of thousands of tiny image tiles are masked in chunks, which in local tests cut the pre-model processing of a large project from about 32 to about 5 minutes (change currently in review).
+- **Export in the engineer's own format.** The export produces the formal decision document the engineer actually issues, in Cyrillic or Latin script, with the legal basis copied from the catalog.
+- **New frontend.** A redesign of every screen around one workspace: findings, evidence and detail side by side, a sticky decision bar and keyboard shortcuts for accept, reject and edit.
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | TanStack Start, React 19, TypeScript, Tailwind 4, shadcn/ui, TanStack Query; typed data-source layer (mock or HTTP) |
-| Backend | Python, FastAPI, PostgreSQL 16 (Docker), SQL migrations, pytest (~160 tests) |
-| Documents | PyMuPDF, pdfplumber, python-docx; ZIP/RAR extraction; DWG/DWFx processing |
-| AI | Provider-agnostic model adapter with per-project budget and call log; xAI Grok primary, other models for comparison |
-| Contract | `schema.sql` + OpenAPI generated from the frontend types; five accepted ADRs |
-| Workflow | GitHub Actions CI (ruff, pytest, tsc, build), a privacy check over hashes, a merge guard that needs green CI and approval from a non-author, and agent skills for orchestration and review |
+| Frontend | TanStack Start, React 19, TypeScript, Tailwind 4, shadcn/ui, TanStack Query, GSAP; typed data layer that runs on demo data or the live API |
+| Backend | Python, FastAPI, PostgreSQL 16 (Docker), SQL migrations, background worker, pytest (800+ tests) |
+| Documents | PyMuPDF, pdfplumber, python-docx, OCR for scans; ZIP/RAR intake |
+| CAD | ODA File Converter + ezdxf for DWG, own DWFx reader, sheet rendering, legend and block interpretation |
+| AI | Provider-agnostic adapter with a model per step (Anthropic Claude for judgment, a cheaper model for reading), structured outputs, prompt caching, per-project budget, every call logged by hash |
+| Contract | `schema.sql` + OpenAPI generated from the frontend types; architecture decisions recorded as ADRs |
+| Workflow | Two developers plus coding agents, mandatory cross-review, no self-merge, automated privacy check over hashes |
 
-## Highlights
+## Engineering highlights
 
-- **Research before code.** A feasibility phase (F0) measured each risky step on real, anonymized submissions before any production code was written: page classification, BoQ parsing, DWFx scale, masking recall and SOP class derivation.
-- **Evaluation against reality.** A reference set of expert objections and official rejection decisions from the authority, paired where possible with the corrected resubmission. The pairs showed, for example, that an "addressed" label in a document is not proof that the problem was fixed.
-- **Catalog quality.** The objection catalog has a structured legal basis per item, and most citations have been checked against the regulation text. The checked subset contained no errors.
-- **Engineering process for two developers and their agents.** Locked contracts (ADRs), small PRs, mandatory cross-review, no self-merge, and an automated privacy check that has already caught two leaks.
+- **The code judges, the model reads.** The model extracts facts into a closed schema and points at things; deterministic code produces the findings. "Not enough data" is a valid result and is never turned into "compliant".
+- **Legal basis is copied, never generated.** Every objection takes its legal reference from a verified catalog. A finding without one is downgraded.
+- **Privacy is enforced in code.** One function is the only path to an external model. It checks the masking confirmation, rejects any request that still contains a term from the project's sensitive-terms list, enforces the budget and writes the call log.
+- **Cost is known before a run.** The tool estimates calls, cost and time before a review starts, reuses work between document revisions and refuses to start when the estimate is over budget.
+- **Performance work is measured on real data.** Each optimization comes with a before/after timing on a real project and a check that the output hash did not change.
+- **Tests that prove they test something.** For the larger changes, each fix is reverted on purpose to confirm a test fails without it.
 
-## Screenshots
-
-All screenshots use **fictional demo data** ("Objekat A/B/C"). No client documents are shown.
-
-| | |
-|---|---|
-| ![Projects](screenshots/01-projekti.png) Projects | ![Overview](screenshots/02-pregled-predmeta.png) Case overview |
-| ![Documents](screenshots/03-dokumentacija.png) Documentation intake | ![Profile](screenshots/04-profil-objekta.png) Building profile |
-| ![GPZOP](screenshots/05-gpzop.png) GPZOP review with evidence | ![Checklists](screenshots/06-kontrolne-liste.png) Checklists by discipline |
-| ![BoQ](screenshots/07-predmer.png) Bill of quantities vs GPZOP | ![Export](screenshots/08-primedbe-izvoz.png) Objections and export |
-
-
-## Status (end of September 2026)
+## Status (end of October 2026)
 
 | Area | State |
 |---|---|
-| Research and plan | done |
-| Data model, API contract, rule format, model and masking policy, CAD approach | locked (ADR 001–005) |
-| Intake, archives, page manifest, normalization, page images | implemented |
-| Masking with confirmation gate | implemented |
-| Building profile, first rules, checklists, BoQ parser, CAD measurements | implemented, being extended |
-| Review pipeline, completeness checks, DOCX letter export | implemented, being extended |
-| Frontend | all screens built, being moved from demo data to the live API |
-| Deployment | local only for now; hosting to be decided after the pilot |
+| Intake, page manifest, masking gate, building profile | working |
+| CAD: DWG/DWFx sheets, sheet images, legends, symbols, dimensions | working, being extended (rooms and evacuation routes) |
+| Review per building element, checklists, bill-of-quantities matching | working |
+| Accuracy evaluation (recall, miss causes, precision, repeatability) | working; recall measured on real projects |
+| Export in the engineer's decision format | working |
+| Agentic review that follows the engineer's own step-by-step procedure | in progress |
+| Deployment | runs locally; next step is a one-command start on the engineer's own machine |
+
+Next: extend the same approach to other engineering disciplines beyond fire protection.
 
 ## Why the code is private
 
-- **Domain knowledge is the product.** The catalog, the rules and the reference set come from years of a practicing reviewer's work. They were shared for building this tool and are not ours to publish.
-- **Client confidentiality.** Development relies on real submissions, which can never appear in a public repository, not even in Git history.
-- **Licensed standards.** Some of the referenced standards cannot be redistributed.
-- **Early stage.** The rules are still being validated with a licensed engineer.
+- **Domain knowledge is the product.** The rules, checklists and reference material come from years of a practicing reviewer's work and are not ours to publish.
+- **Client confidentiality.** Development uses real submissions, which must never appear in a public repository or its history.
+- **Licensed standards.** Some referenced standards cannot be redistributed.
 
-I'm happy to walk through the code and the architecture in an interview.
+I'm happy to walk through the code and architecture in an interview.
 
 ## Team
 
-- **Sergej Stojanović** ([@Excapex](https://github.com/Excapex)): research and planning, architecture and ADRs, backend (intake, manifest, normalization, masking, model adapter, BoQ parser, CAD measurements, review pipeline), CI and the privacy and merge automation.
-- A second developer: frontend, archive extraction, masking review gate, rules and completeness checks, DOCX letter export.
+- **Sergej Stojanović** ([@Excapex](https://github.com/Excapex)): architecture and ADRs, backend (intake, manifest, masking, model adapter, CAD pipeline, review engine, accuracy evaluation, export), performance work, and the review and privacy automation.
+- A second developer: frontend screens, archive intake, masking review, checklists and parts of the export.
 - Domain expertise from a licensed fire-protection engineer.
+
+## Contact
+
+LinkedIn: [linkedin.com/in/sergej-stojanovic-dev](https://www.linkedin.com/in/sergej-stojanovic-dev/)
 
 ## Disclaimer
 
-Saglasnik does not issue fire-protection consent and does not replace a licensed designer, reviewer or the competent authority.
+ProjectLens does not issue fire-protection consent and does not replace a licensed designer, reviewer or the competent authority.
